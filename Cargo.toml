@@ -64,8 +64,8 @@ hazmat = []
 90s-fixslice = ["90s", "aes", "ctr"]
 
 # Use avx2 intrinsics on x86 architectures
-# Wont compile if the platform doesn't support it
-avx2 = ["cc"]
+# Disabled for custom parameter set; keep feature stubbed
+avx2 = []
 
 # For compiling to wasm targets 
 wasm = ["wasm-bindgen", "getrandom", "rand"]

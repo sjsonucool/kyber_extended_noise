@@ -88,27 +88,6 @@ fn unpack_ciphertext(b: &mut Polyvec, v: &mut Poly, c: &[u8]) {
 ///  - usize buflen:  length of input buffer in bytes
 ///
 /// Returns number of sampled 16-bit integers (at most len)
-fn rej_uniform(r: &mut [i16], len: usize, buf: &[u8], buflen: usize) -> usize {
-    let (mut ctr, mut pos) = (0usize, 0usize);
-    let (mut val0, mut val1);
-
-    while ctr < len && pos + 3 <= buflen {
-        val0 = ((buf[pos + 0] >> 0) as u16 | (buf[pos + 1] as u16) << 8) & 0xFFF;
-        val1 = ((buf[pos + 1] >> 4) as u16 | (buf[pos + 2] as u16) << 4) & 0xFFF;
-        pos += 3;
-
-        if val0 < KYBER_Q as u16 {
-            r[ctr] = val0 as i16;
-            ctr += 1;
-        }
-        if ctr < len && val1 < KYBER_Q as u16 {
-            r[ctr] = val1 as i16;
-            ctr += 1;
-        }
-    }
-    ctr
-}
-
 fn gen_a(a: &mut [Polyvec], b: &[u8]) {
     gen_matrix(a, b, false);
 }
@@ -128,14 +107,9 @@ fn gen_at(a: &mut [Polyvec], b: &[u8]) {
 ///  - const [u8] seed: input seed
 ///  - bool transposed: boolean deciding whether A or A^T is generated
 fn gen_matrix(a: &mut [Polyvec], seed: &[u8], transposed: bool) {
-    let mut ctr;
-    // 530 is expected number of required bytes
-    const GEN_MATRIX_NBLOCKS: usize =
-        (12 * KYBER_N / 8 * (1 << 12) / KYBER_Q + XOF_BLOCKBYTES) / XOF_BLOCKBYTES;
-    let mut buf = [0u8; GEN_MATRIX_NBLOCKS * XOF_BLOCKBYTES + 2];
-    let mut buflen: usize;
-    let mut off: usize;
     let mut state = XofState::new();
+    let mut buf = [0u8; XOF_BLOCKBYTES];
+    let mut buf_pos = XOF_BLOCKBYTES; // force initial squeeze
 
     for i in 0..KYBER_K {
         for j in 0..KYBER_K {
@@ -144,19 +118,24 @@ fn gen_matrix(a: &mut [Polyvec], seed: &[u8], transposed: bool) {
             } else {
                 xof_absorb(&mut state, seed, j as u8, i as u8);
             }
-            xof_squeezeblocks(&mut buf, GEN_MATRIX_NBLOCKS, &mut state);
-            buflen = GEN_MATRIX_NBLOCKS * XOF_BLOCKBYTES;
-            ctr = rej_uniform(&mut a[i].vec[j].coeffs, KYBER_N, &buf, buflen);
-
-            while ctr < KYBER_N {
-                off = buflen % 3;
-                for k in 0..off {
-                    buf[k] = buf[buflen - off + k];
+            // Reset buffer position so the new absorb starts with a fresh squeeze.
+            buf_pos = XOF_BLOCKBYTES;
+            for coeff in a[i].vec[j].coeffs.iter_mut().take(KYBER_N) {
+                let mut bytes = [0u8; 16];
+                for b in 0..16 {
+                    if buf_pos >= XOF_BLOCKBYTES {
+                        xof_squeezeblocks(&mut buf, 1, &mut state);
+                        buf_pos = 0;
+                    }
+                    bytes[b] = buf[buf_pos];
+                    buf_pos += 1;
                 }
-                xof_squeezeblocks(&mut buf[off..], 1, &mut state);
-                buflen = off + XOF_BLOCKBYTES;
-                ctr += rej_uniform(&mut a[i].vec[j].coeffs[ctr..], KYBER_N - ctr, &buf, buflen);
+                let val = u128::from_le_bytes(bytes);
+                *coeff = (val % KYBER_Q) as i128;
             }
+            // Match the original Kyber workflow: store A (and A^T) directly in
+            // NTT/Montgomery domain so later basemul operates on NTT inputs.
+            poly_ntt(&mut a[i].vec[j]);
         }
     }
 }
@@ -253,7 +232,8 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
         poly_getnoise_eta2(&mut ep.vec[i], coins, nonce);
         nonce += 1;
     }
-    poly_getnoise_eta2(&mut epp, coins, nonce);
+    // Use uniform distribution for epp instead of centered binomial
+    poly_getnoise_uniform(&mut epp, coins, nonce);
 
     polyvec_ntt(&mut sp);
 
@@ -298,4 +278,62 @@ pub fn indcpa_dec(m: &mut [u8], c: &[u8], sk: &[u8]) {
     poly_reduce(&mut mp);
 
     poly_tomsg(m, mp);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
+
+    #[test]
+    fn indcpa_roundtrip() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut pk = [0u8; KYBER_INDCPA_PUBLICKEYBYTES];
+        let mut sk = [0u8; KYBER_INDCPA_SECRETKEYBYTES];
+        indcpa_keypair(&mut pk, &mut sk, None, &mut rng).unwrap();
+
+        let mut m = [0u8; KYBER_SYMBYTES];
+        rng.fill_bytes(&mut m);
+        let mut coins = [0u8; KYBER_SYMBYTES];
+        rng.fill_bytes(&mut coins);
+
+        let mut c = [0u8; KYBER_INDCPA_BYTES];
+        indcpa_enc(&mut c, &m, &pk, &coins);
+
+        let mut m_dec = [0u8; KYBER_SYMBYTES];
+        indcpa_dec(&mut m_dec, &c, &sk);
+
+        if m != m_dec {
+            // Re-run decryption inline to inspect the failing polynomial.
+            let mut b = Polyvec::new();
+            let mut v = Poly::new();
+            unpack_ciphertext(&mut b, &mut v, &c);
+            let mut skpv = Polyvec::new();
+            unpack_sk(&mut skpv, &sk);
+            polyvec_ntt(&mut b);
+            let mut mp = Poly::new();
+            polyvec_basemul_acc_montgomery(&mut mp, &skpv, &b);
+            poly_invntt_tomont(&mut mp);
+            poly_sub(&mut mp, &v);
+            poly_reduce(&mut mp);
+
+            let half_q = ((KYBER_Q + 1) / 2) as i128;
+            let mut close_to_half = 0usize;
+            for c in mp.coeffs.iter() {
+                let mut t = *c % KYBER_Q as i128;
+                if t < 0 {
+                    t += KYBER_Q as i128;
+                }
+                if (t - half_q).abs() < 50 {
+                    close_to_half += 1;
+                }
+            }
+            panic!(
+                "message mismatch: orig={:?} dec={:?}, coeffs near q/2: {}",
+                &m[..4],
+                &m_dec[..4],
+                close_to_half
+            );
+        }
+    }
 }

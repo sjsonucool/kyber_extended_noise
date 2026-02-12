@@ -126,14 +126,8 @@
 #[cfg(all(feature = "kyber1024", feature = "kyber512"))]
 compile_error!("Only one security level can be specified");
 
-#[cfg(all(target_arch = "x86_64", feature = "avx2"))]
-mod avx2;
-#[cfg(all(target_arch = "x86_64", feature = "avx2"))]
-use avx2::*;
-
-#[cfg(any(not(target_arch = "x86_64"), not(feature = "avx2")))]
-mod reference;
-#[cfg(any(not(target_arch = "x86_64"), not(feature = "avx2")))]
+// AVX2 path is disabled for the custom parameter set; always use reference.
+pub mod reference;
 use reference::*;
 
 #[cfg(any(not(target_arch = "x86_64"), not(feature = "avx2")))]
@@ -147,7 +141,7 @@ mod api;
 mod error;
 mod kem;
 mod kex;
-mod params;
+pub mod params;
 mod rng;
 mod symmetric;
 
@@ -159,6 +153,7 @@ pub use params::{
     KYBER_SSBYTES, KYBER_SYMBYTES,
 };
 pub use rand_core::{CryptoRng, RngCore};
+
 
 // Feature hack to expose private functions for the Known Answer Tests
 // and fuzzing. Will fail to compile if used outside `cargo test` or

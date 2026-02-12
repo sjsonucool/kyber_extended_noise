@@ -2,7 +2,7 @@ use crate::{cbd::*, ntt::*, params::*, reduce::*, symmetric::*};
 
 #[derive(Clone)]
 pub struct Poly {
-    pub coeffs: [i16; KYBER_N],
+    pub coeffs: [i128; KYBER_N],
 }
 
 impl Copy for Poly {}
@@ -10,7 +10,7 @@ impl Copy for Poly {}
 impl Default for Poly {
     fn default() -> Self {
         Poly {
-            coeffs: [0i16; KYBER_N],
+            coeffs: [0i128; KYBER_N],
         }
     }
 }
@@ -29,44 +29,7 @@ impl Poly {
 /// Arguments:   - [u8] r: output byte array (needs space for KYBER_POLYCOMPRESSEDBYTES bytes)
 ///  - const poly *a:  input polynomial
 pub fn poly_compress(r: &mut [u8], a: Poly) {
-    let mut t = [0u8; 8];
-    let mut k = 0usize;
-    let mut u: i16;
-
-    match KYBER_POLYCOMPRESSEDBYTES {
-        128 => {
-            for i in 0..KYBER_N / 8 {
-                for j in 0..8 {
-                    // map to positive standard representatives
-                    u = a.coeffs[8 * i + j];
-                    u += (u >> 15) & KYBER_Q as i16;
-                    t[j] = (((((u as u16) << 4) + KYBER_Q as u16 / 2) / KYBER_Q as u16) & 15) as u8;
-                }
-                r[k] = t[0] | (t[1] << 4);
-                r[k + 1] = t[2] | (t[3] << 4);
-                r[k + 2] = t[4] | (t[5] << 4);
-                r[k + 3] = t[6] | (t[7] << 4);
-                k += 4;
-            }
-        }
-        160 => {
-            for i in 0..(KYBER_N / 8) {
-                for j in 0..8 {
-                    // map to positive standard representatives
-                    u = a.coeffs[8 * i + j];
-                    u += (u >> 15) & KYBER_Q as i16;
-                    t[j] = (((((u as u32) << 5) + KYBER_Q as u32 / 2) / KYBER_Q as u32) & 31) as u8;
-                }
-                r[k] = t[0] | (t[1] << 5);
-                r[k + 1] = (t[1] >> 3) | (t[2] << 2) | (t[3] << 7);
-                r[k + 2] = (t[3] >> 1) | (t[4] << 4);
-                r[k + 3] = (t[4] >> 4) | (t[5] << 1) | (t[6] << 6);
-                r[k + 4] = (t[6] >> 2) | (t[7] << 3);
-                k += 5;
-            }
-        }
-        _ => panic!("KYBER_POLYCOMPRESSEDBYTES needs to be one of (128, 160)"),
-    }
+    poly_tobytes(r, a);
 }
 
 /// Name:  poly_decompress
@@ -77,36 +40,7 @@ pub fn poly_compress(r: &mut [u8], a: Poly) {
 /// Arguments:   - poly *r:  output polynomial
 ///  - const [u8] a: input byte array (of length KYBER_POLYCOMPRESSEDBYTES bytes)
 pub fn poly_decompress(r: &mut Poly, a: &[u8]) {
-    match KYBER_POLYCOMPRESSEDBYTES {
-        128 => {
-            let mut idx = 0usize;
-            for i in 0..KYBER_N / 2 {
-                r.coeffs[2 * i + 0] = ((((a[idx] & 15) as usize * KYBER_Q) + 8) >> 4) as i16;
-                r.coeffs[2 * i + 1] = ((((a[idx] >> 4) as usize * KYBER_Q) + 8) >> 4) as i16;
-                idx += 1;
-            }
-        }
-        160 => {
-            let mut idx = 0usize;
-            let mut t = [0u8; 8];
-            for i in 0..KYBER_N / 8 {
-                t[0] = a[idx + 0];
-                t[1] = (a[idx + 0] >> 5) | (a[idx + 1] << 3);
-                t[2] = a[idx + 1] >> 2;
-                t[3] = (a[idx + 1] >> 7) | (a[idx + 2] << 1);
-                t[4] = (a[idx + 2] >> 4) | (a[idx + 3] << 4);
-                t[5] = a[idx + 3] >> 1;
-                t[6] = (a[idx + 3] >> 6) | (a[idx + 4] << 2);
-                t[7] = a[idx + 4] >> 3;
-                idx += 5;
-                for j in 0..8 {
-                    r.coeffs[8 * i + j] =
-                        ((((t[j] as u32) & 31) * KYBER_Q as u32 + 16) >> 5) as i16;
-                }
-            }
-        }
-        _ => panic!("KYBER_POLYCOMPRESSEDBYTES needs to be either (128, 160)"),
-    }
+    poly_frombytes(r, a);
 }
 
 /// Name:  poly_tobytes
@@ -116,17 +50,13 @@ pub fn poly_decompress(r: &mut Poly, a: &[u8]) {
 /// Arguments:   - [u8] r: output byte array (needs space for KYBER_POLYBYTES bytes)
 ///  - const poly *a:  input polynomial
 pub fn poly_tobytes(r: &mut [u8], a: Poly) {
-    let (mut t0, mut t1);
-
-    for i in 0..(KYBER_N / 2) {
-        // map to positive standard representatives
-        t0 = a.coeffs[2 * i];
-        t0 += (t0 >> 15) & KYBER_Q as i16;
-        t1 = a.coeffs[2 * i + 1];
-        t1 += (t1 >> 15) & KYBER_Q as i16;
-        r[3 * i + 0] = (t0 >> 0) as u8;
-        r[3 * i + 1] = ((t0 >> 8) | (t1 << 4)) as u8;
-        r[3 * i + 2] = (t1 >> 4) as u8;
+    for i in 0..KYBER_N {
+        let mut v = a.coeffs[i] % KYBER_Q as i128;
+        if v < 0 {
+            v += KYBER_Q as i128;
+        }
+        let bytes = (v as u64).to_le_bytes();
+        r[i * 8..i * 8 + 8].copy_from_slice(&bytes);
     }
 }
 
@@ -138,11 +68,10 @@ pub fn poly_tobytes(r: &mut [u8], a: Poly) {
 /// Arguments:   - poly *r:  output polynomial
 ///  - const [u8] a: input byte array (of KYBER_POLYBYTES bytes)
 pub fn poly_frombytes(r: &mut Poly, a: &[u8]) {
-    for i in 0..(KYBER_N / 2) {
-        r.coeffs[2 * i + 0] =
-            ((a[3 * i + 0] >> 0) as u16 | ((a[3 * i + 1] as u16) << 8) & 0xFFF) as i16;
-        r.coeffs[2 * i + 1] =
-            ((a[3 * i + 1] >> 4) as u16 | ((a[3 * i + 2] as u16) << 4) & 0xFFF) as i16;
+    for i in 0..KYBER_N {
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(&a[i * 8..i * 8 + 8]);
+        r.coeffs[i] = u64::from_le_bytes(buf) as i128;
     }
 }
 
@@ -178,6 +107,46 @@ pub fn poly_getnoise_eta2(r: &mut Poly, seed: &[u8], nonce: u8) {
     poly_cbd_eta2(r, &buf);
 }
 
+/// Name:  poly_getnoise_uniform
+///
+/// Description: Sample a polynomial deterministically from a seed and a nonce,
+///  with output polynomial coefficients uniformly distributed in 
+///  [-KYBER_EPP_UNIFORM_BOUND, KYBER_EPP_UNIFORM_BOUND)
+///
+/// Arguments:   - poly *r:     output polynomial
+///  - const [u8] seed: input seed (pointing to array of length KYBER_SYMBYTES bytes)
+///  - [u8]  nonce:   one-byte input nonce
+pub fn poly_getnoise_uniform(r: &mut Poly, seed: &[u8], nonce: u8) {
+    const RANGE: u128 = (2 * KYBER_EPP_UNIFORM_BOUND) as u128;
+    const BYTES_PER_COEFF: usize = 8; // enough to sample up to 2*B < 2^63
+    const BUF_SIZE: usize = KYBER_N * BYTES_PER_COEFF * 2;
+    let mut buf = [0u8; BUF_SIZE];
+    let mut buf_pos = 0usize;
+
+    prf(&mut buf, BUF_SIZE, seed, nonce);
+
+    for i in 0..KYBER_N {
+        loop {
+            if buf_pos + BYTES_PER_COEFF > BUF_SIZE {
+                // reseed with nonce stride
+                let mut refill = [0u8; BYTES_PER_COEFF * 4];
+                let refill_len = refill.len();
+                prf(&mut refill, refill_len, seed, nonce.wrapping_add(i as u8));
+                buf[..refill_len].copy_from_slice(&refill);
+                buf_pos = 0;
+            }
+            let mut slice = [0u8; 16];
+            slice[..8].copy_from_slice(&buf[buf_pos..buf_pos + BYTES_PER_COEFF]);
+            buf_pos += BYTES_PER_COEFF;
+            let val = u128::from_le_bytes(slice);
+            let reduced = val % RANGE;
+            // acceptance is trivial after modulus
+            r.coeffs[i] = reduced as i128 - KYBER_EPP_UNIFORM_BOUND;
+            break;
+        }
+    }
+}
+
 /// Name:  poly_ntt
 ///
 /// Description: Computes negacyclic number-theoretic transform (NTT) of
@@ -187,7 +156,6 @@ pub fn poly_getnoise_eta2(r: &mut Poly, seed: &[u8], nonce: u8) {
 /// Arguments:   - Poly r: in/output polynomial
 pub fn poly_ntt(r: &mut Poly) {
     ntt(&mut r.coeffs);
-    poly_reduce(r);
 }
 
 /// Name:  poly_invntt
@@ -209,20 +177,7 @@ pub fn poly_invntt_tomont(r: &mut Poly) {
 ///  - const poly *a: first input polynomial
 ///  - const poly *b: second input polynomial
 pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
-    for i in 0..(KYBER_N / 4) {
-        basemul(
-            &mut r.coeffs[4 * i..],
-            &a.coeffs[4 * i..],
-            &b.coeffs[4 * i..],
-            ZETAS[64 + i],
-        );
-        basemul(
-            &mut r.coeffs[4 * i + 2..],
-            &a.coeffs[4 * i + 2..],
-            &b.coeffs[4 * i + 2..],
-            -(ZETAS[64 + i]),
-        );
-    }
+    poly_mul_negacyclic(r, a, b);
 }
 
 /// Name:  poly_tomont
@@ -231,12 +186,8 @@ pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
 ///  from normal domain to Montgomery domain
 ///
 /// Arguments:   - poly *r:   input/output polynomial
-pub fn poly_tomont(r: &mut Poly) {
-    let f = ((1u64 << 32) % KYBER_Q as u64) as i16;
-    for i in 0..KYBER_N {
-        let a = r.coeffs[i] as i32 * f as i32;
-        r.coeffs[i] = montgomery_reduce(a);
-    }
+pub fn poly_tomont(_r: &mut Poly) {
+    // No-op for schoolbook path.
 }
 
 /// Name:  poly_reduce
@@ -246,8 +197,8 @@ pub fn poly_tomont(r: &mut Poly) {
 ///
 /// Arguments:   - poly *r:   input/output polynomial
 pub fn poly_reduce(r: &mut Poly) {
-    for i in 0..KYBER_N {
-        r.coeffs[i] = barrett_reduce(r.coeffs[i]);
+    for c in r.coeffs.iter_mut() {
+        *c = barrett_reduce(*c);
     }
 }
 
@@ -273,8 +224,27 @@ pub fn poly_add(r: &mut Poly, b: &Poly) {
 ///  - const poly *b: second input polynomial
 pub fn poly_sub(r: &mut Poly, a: &Poly) {
     for i in 0..KYBER_N {
-        r.coeffs[i] = a.coeffs[i] - r.coeffs[i];
+        r.coeffs[i] = r.coeffs[i] - a.coeffs[i];
     }
+}
+
+pub(crate) fn poly_mul_negacyclic(r: &mut Poly, a: &Poly, b: &Poly) {
+    let mut tmp = [0i128; KYBER_N];
+    for i in 0..KYBER_N {
+        let ai = a.coeffs[i];
+        for j in 0..KYBER_N {
+            let prod = mul_mod(ai, b.coeffs[j]);
+            let k = i + j;
+            if k < KYBER_N {
+                tmp[k] = barrett_reduce(tmp[k] + prod);
+            } else {
+                // x^{N} == -1 mod (x^N + 1)
+                let idx = k - KYBER_N;
+                tmp[idx] = barrett_reduce(tmp[idx] - prod);
+            }
+        }
+    }
+    r.coeffs = tmp;
 }
 
 /// Name:  poly_frommsg
@@ -284,11 +254,11 @@ pub fn poly_sub(r: &mut Poly, a: &Poly) {
 /// Arguments:   - poly *r:    output polynomial
 ///  - const [u8] msg: input message (of length KYBER_SYMBYTES)
 pub fn poly_frommsg(r: &mut Poly, msg: &[u8]) {
-    let mut mask;
+    let half_q = ((KYBER_Q + 1) / 2) as i128;
     for i in 0..KYBER_N / 8 {
         for j in 0..8 {
-            mask = ((msg[i] as u16 >> j) & 1).wrapping_neg();
-            r.coeffs[8 * i + j] = (mask & ((KYBER_Q + 1) / 2) as u16) as i16;
+            let bit = ((msg[i] >> j) & 1) as i128;
+            r.coeffs[8 * i + j] = if bit == 1 { half_q } else { 0 };
         }
     }
 }
@@ -300,15 +270,15 @@ pub fn poly_frommsg(r: &mut Poly, msg: &[u8]) {
 /// Arguments:   - [u8] msg: output message
 ///  - const poly *a:  input polynomial
 pub fn poly_tomsg(msg: &mut [u8], a: Poly) {
-    let mut t;
-
     for i in 0..KYBER_N / 8 {
         msg[i] = 0;
         for j in 0..8 {
-            t = a.coeffs[8 * i + j];
-            t += (t >> 15) & KYBER_Q as i16;
-            t = (((t << 1) + KYBER_Q as i16 / 2) / KYBER_Q as i16) & 1;
-            msg[i] |= (t << j) as u8;
+            let mut t = a.coeffs[8 * i + j] % KYBER_Q as i128;
+            if t < 0 {
+                t += KYBER_Q as i128;
+            }
+            t = (((t * 2) + (KYBER_Q as i128 / 2)) / KYBER_Q as i128) & 1;
+            msg[i] |= (t as u8) << j;
         }
     }
 }

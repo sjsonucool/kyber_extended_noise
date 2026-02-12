@@ -1,37 +1,42 @@
-use crate::params::*;
+use crate::params::KYBER_Q;
 
-const QINV: i32 = 62209; // q^(-1) mod 2^16
+const R: u128 = 1u128 << 64;
+const R_MASK: u128 = R - 1;
+// -q^{-1} mod R
+const QINV: u128 = 1695300616315495935;
 
-/// Name:  montgomery_reduce
-///
-/// Description: Montgomery reduction; given a 32-bit integer a, computes
-///  16-bit integer congruent to a * R^-1 mod q,
-///  where R=2^16
-///
-/// Arguments:   - i32 a: input integer to be reduced; has to be in {-q2^15,...,q2^15-1}
-///
-/// Returns:   integer in {-q+1,...,q-1} congruent to a * R^-1 modulo q.
-pub fn montgomery_reduce(a: i32) -> i16 {
-    let ua = a.wrapping_mul(QINV) as i16;
-    let u = ua as i32;
-    let mut t = u * KYBER_Q as i32;
-    t = a - t;
-    t >>= 16;
-    t as i16
+#[inline]
+pub fn montgomery_reduce(a: u128) -> i128 {
+    let a_lo = a & R_MASK;
+    let a_hi = a >> 64;
+
+    let t = (a_lo.wrapping_mul(QINV)) & R_MASK;
+    let mq = t.wrapping_mul(KYBER_Q as u128);
+    let mq_lo = mq & R_MASK;
+    let mq_hi = mq >> 64;
+
+    let (_sum_lo, carry) = a_lo.overflowing_add(mq_lo);
+    let sum_hi = a_hi + mq_hi + if carry { 1 } else { 0 };
+
+    let mut res = sum_hi; // low limb cancels
+    if res >= KYBER_Q as u128 {
+        res -= KYBER_Q as u128;
+    }
+    res as i128
 }
 
-/// Name:  barrett_reduce
-///
-/// Description: Barrett reduction; given a 16-bit integer a, computes
-///  centered representative congruent to a mod q in {-(q-1)/2,...,(q-1)/2}
-///
-/// Arguments:   - i16 a: input integer to be reduced
-///
-/// Returns:   i16 in {-(q-1)/2,...,(q-1)/2} congruent to a modulo q.
-pub fn barrett_reduce(a: i16) -> i16 {
-    let v = ((1u32 << 26) / KYBER_Q as u32 + 1) as i32;
-    let mut t = v * a as i32 + (1 << 25);
-    t >>= 26;
-    t *= KYBER_Q as i32;
-    a - t as i16
+#[inline]
+pub fn barrett_reduce(a: i128) -> i128 {
+    let mut r = a % KYBER_Q as i128;
+    if r < 0 {
+        r += KYBER_Q as i128;
+    }
+    r
+}
+
+#[inline]
+pub fn mul_mod(a: i128, b: i128) -> i128 {
+    let aa = ((a % KYBER_Q as i128) + KYBER_Q as i128) as u128 % KYBER_Q as u128;
+    let bb = ((b % KYBER_Q as i128) + KYBER_Q as i128) as u128 % KYBER_Q as u128;
+    ((aa.wrapping_mul(bb)) % KYBER_Q as u128) as i128
 }

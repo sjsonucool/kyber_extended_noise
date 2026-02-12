@@ -686,7 +686,8 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
                 poly_cbd_eta2(&mut ep.vec[i], &buf.vec);
             }
             aes256ctr_squeezeblocks(&mut buf.coeffs, CIPHERTEXTNOISE_NBLOCKS, &mut state);
-            poly_cbd_eta2(&mut epp, &buf.vec);
+            // Use uniform distribution for epp instead of centered binomial
+            poly_getnoise_uniform(&mut epp, coins, nonce);
         }
 
         #[cfg(all(feature = "kyber512", not(feature = "90s")))]
@@ -704,7 +705,8 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
                 2,
                 3,
             );
-            poly_getnoise_eta2(&mut epp, coins, 4);
+            // Use uniform distribution for epp instead of centered binomial
+            poly_getnoise_uniform(&mut epp, coins, 4);
         }
 
         #[cfg(not(any(feature = "kyber1024", feature = "kyber512", feature = "90s")))]
@@ -767,7 +769,8 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
                 6,
                 7,
             );
-            poly_getnoise_eta2(&mut epp, coins, 8);
+            // Use uniform distribution for epp instead of centered binomial
+            poly_getnoise_uniform(&mut epp, coins, 8);
         }
 
         polyvec_ntt(&mut sp);

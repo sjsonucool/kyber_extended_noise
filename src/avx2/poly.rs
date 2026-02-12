@@ -255,6 +255,67 @@ pub fn poly_getnoise_eta2(r: &mut Poly, seed: &[u8], nonce: u8) {
     }
 }
 
+/// Name:  poly_getnoise_uniform
+///
+/// Description: Sample a polynomial deterministically from a seed and a nonce,
+///  with output polynomial coefficients uniformly distributed in 
+///  [-KYBER_EPP_UNIFORM_BOUND, KYBER_EPP_UNIFORM_BOUND)
+///
+/// Arguments:   - poly *r:     output polynomial
+///  - const [u8] seed: input seed (pointing to array of length KYBER_SYMBYTES bytes)
+///  - [u8]  nonce:   one-byte input nonce
+///
+/// Note: This uses the same algorithm as the reference implementation.
+/// For AVX2-optimized uniform sampling, this could be optimized further.
+pub fn poly_getnoise_uniform(r: &mut Poly, seed: &[u8], nonce: u8) {
+    use crate::params::{KYBER_EPP_UNIFORM_BOUND, KYBER_N};
+    const BOUND: i16 = KYBER_EPP_UNIFORM_BOUND;
+    const RANGE: u16 = (2 * BOUND) as u16;
+    
+    // Calculate bytes needed per coefficient
+    const BYTES_PER_COEFF: usize = if RANGE <= 256 { 1 } else { 2 };
+    
+    // Generate enough bytes for rejection sampling
+    const BUF_SIZE: usize = (KYBER_N * BYTES_PER_COEFF * 3) / 2;
+    let mut buf = [0u8; BUF_SIZE];
+    let mut buf_pos = 0usize;
+    
+    // Generate initial buffer
+    prf(&mut buf, BUF_SIZE, seed, nonce);
+    
+    // Rejection sampling to get uniform distribution in [0, RANGE)
+    // then shift to [-BOUND, BOUND)
+    for i in 0..KYBER_N {
+        loop {
+            // If we've exhausted the buffer, generate more bytes with extended nonce
+            if buf_pos + BYTES_PER_COEFF > BUF_SIZE {
+                let extended_nonce = nonce.wrapping_add((i >> 4) as u8);
+                let mut ext_buf = [0u8; 64];
+                let ext_buf_len = ext_buf.len();
+                prf(&mut ext_buf, ext_buf_len, seed, extended_nonce);
+                buf[0..ext_buf_len].copy_from_slice(&ext_buf);
+                buf_pos = 0;
+            }
+            
+            // Extract value from buffer
+            let val = if BYTES_PER_COEFF == 1 {
+                buf[buf_pos] as u16
+            } else {
+                (buf[buf_pos] as u16) | ((buf[buf_pos + 1] as u16) << 8)
+            };
+            buf_pos += BYTES_PER_COEFF;
+            
+            // Rejection sampling: accept if val < RANGE
+            if val < RANGE {
+                unsafe {
+                    r.coeffs[i] = val as i16 - BOUND;
+                }
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(not(feature = "90s"))]
 pub fn poly_getnoise_eta1_4x(
     r0: &mut Poly,
