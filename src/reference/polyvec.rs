@@ -99,15 +99,27 @@ pub fn polyvec_invntt_tomont(r: &mut Polyvec) {
 ///  - const Polyvec a: first input vector of polynomials
 ///  - const Polyvec b: second input vector of polynomials
 pub fn polyvec_basemul_acc_montgomery(r: &mut Poly, a: &Polyvec, b: &Polyvec) {
-    let mut t = Poly::new();
-    // Schoolbook negacyclic accumulate: r = sum a_i * b_i
-    poly_mul_negacyclic(r, &a.vec[0], &b.vec[0]);
-    for i in 1..KYBER_K {
-        poly_mul_negacyclic(&mut t, &a.vec[i], &b.vec[i]);
-        poly_add(r, &t);
+    // Convert back to normal domain, do true negacyclic convolution, then return to NTT domain.
+    let mut acc = Poly::new();
+    acc.coeffs = [0i128; KYBER_N];
+    let mut ai = Poly::new();
+    let mut bi = Poly::new();
+    let mut tmp = Poly::new();
+    for i in 0..KYBER_K {
+        ai = a.vec[i].clone();
+        bi = b.vec[i].clone();
+        // inputs are in NTT domain; bring back
+        super::ntt::invntt(&mut ai.coeffs);
+        super::ntt::invntt(&mut bi.coeffs);
+        crate::reference::poly::poly_mul_negacyclic(&mut tmp, &ai, &bi);
+        poly_add(&mut acc, &tmp);
     }
+    // back to NTT domain
+    super::ntt::ntt(&mut acc.coeffs);
+    *r = acc;
     poly_reduce(r);
 }
+
 
 /// Name:  polyvec_reduce
 ///

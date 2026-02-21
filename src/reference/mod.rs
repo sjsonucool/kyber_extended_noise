@@ -6,4 +6,5 @@ pub mod ntt;
 pub mod poly;
 pub mod polyvec;
 pub mod reduce;
+pub mod zetas_new;
 pub mod verify;

@@ -177,7 +177,9 @@ pub fn poly_invntt_tomont(r: &mut Poly) {
 ///  - const poly *a: first input polynomial
 ///  - const poly *b: second input polynomial
 pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
-    poly_mul_negacyclic(r, a, b);
+    for i in 0..KYBER_N {
+        r.coeffs[i] = crate::reduce::mul_mod(a.coeffs[i], b.coeffs[i]);
+    }
 }
 
 /// Name:  poly_tomont
@@ -187,7 +189,7 @@ pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
 ///
 /// Arguments:   - poly *r:   input/output polynomial
 pub fn poly_tomont(_r: &mut Poly) {
-    // No-op for schoolbook path.
+    // Montgomery domain is not used in the simplified NTT path; leave coefficients unchanged.
 }
 
 /// Name:  poly_reduce
@@ -282,3 +284,8 @@ pub fn poly_tomsg(msg: &mut [u8], a: Poly) {
         }
     }
 }
+
+// basemul unused in pointwise scheme
+
+
+// basemul unused in pointwise scheme
