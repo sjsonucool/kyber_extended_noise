@@ -1,5 +1,6 @@
 use crate::params::KYBER_N;
 use crate::poly::Poly;
+use crate::reduce::centered_to_mod_q;
 
 /// Name:  load32_littleendian
 ///
@@ -50,7 +51,7 @@ pub fn cbd2(r: &mut Poly, buf: &[u8]) {
         for j in 0..8 {
             a = ((d >> (4 * j)) & 0x3) as i16;
             b = ((d >> (4 * j + 2)) & 0x3) as i16;
-            r.coeffs[8 * i + j] = (a - b) as i128;
+            r.coeffs[8 * i + j] = centered_to_mod_q((a - b) as i128);
         }
     }
 }
@@ -73,7 +74,7 @@ pub fn cbd3(r: &mut Poly, buf: &[u8]) {
         for j in 0..4 {
             a = ((d >> (6 * j)) & 0x7) as i16;
             b = ((d >> (6 * j + 3)) & 0x7) as i16;
-            r.coeffs[4 * i + j] = (a - b) as i128;
+            r.coeffs[4 * i + j] = centered_to_mod_q((a - b) as i128);
         }
     }
 }

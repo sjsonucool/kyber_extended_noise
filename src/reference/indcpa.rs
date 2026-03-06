@@ -145,7 +145,7 @@ fn gen_matrix(a: &mut [Polyvec], seed: &[u8], transposed: bool) {
                     buf_pos += 1;
                 }
                 let val = u128::from_le_bytes(bytes);
-                *coeff = (val % KYBER_Q) as i128;
+                *coeff = (val % KYBER_Q) as u64;
             }
             // Move to Montgomery then NTT so later basemul sees Montgomery inputs.
             poly_tomont(&mut a[i].vec[j]);
@@ -312,13 +312,12 @@ pub fn indcpa_dec(m: &mut [u8], c: &[u8], sk: &[u8]) {
 mod tests {
     use super::*;
     use crate::kem::{crypto_kem_dec_inner, crypto_kem_enc_inner, crypto_kem_keypair};
-    use crate::reduce::barrett_reduce;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     fn random_poly(rng: &mut StdRng) -> Poly {
         let mut p = Poly::new();
         for c in p.coeffs.iter_mut() {
-            *c = rng.gen_range(0..KYBER_Q as i128);
+            *c = rng.gen_range(0..KYBER_Q as u64);
         }
         p
     }
@@ -369,10 +368,7 @@ mod tests {
         assert_eq!(seed, seed2);
         for i in 0..KYBER_K {
             for j in 0..KYBER_N {
-                assert_eq!(
-                    barrett_reduce(unpacked_pk.vec[i].coeffs[j] - pk_ntt_orig.vec[i].coeffs[j]),
-                    0
-                );
+                assert_eq!(unpacked_pk.vec[i].coeffs[j], pk_ntt_orig.vec[i].coeffs[j]);
             }
         }
         let mut repacked_pk = [0u8; KYBER_INDCPA_PUBLICKEYBYTES];
@@ -389,10 +385,7 @@ mod tests {
         unpack_sk(&mut unpacked_sk, &packed_sk);
         for i in 0..KYBER_K {
             for j in 0..KYBER_N {
-                assert_eq!(
-                    barrett_reduce(unpacked_sk.vec[i].coeffs[j] - sk_ntt_orig.vec[i].coeffs[j]),
-                    0
-                );
+                assert_eq!(unpacked_sk.vec[i].coeffs[j], sk_ntt_orig.vec[i].coeffs[j]);
             }
         }
         let mut repacked_sk = [0u8; KYBER_INDCPA_SECRETKEYBYTES];
@@ -412,11 +405,11 @@ mod tests {
         unpack_ciphertext(&mut b_out, &mut v_out, &packed_ct);
         for i in 0..KYBER_K {
             for j in 0..KYBER_N {
-                assert_eq!(b_out.vec[i].coeffs[j], barrett_reduce(b_norm.vec[i].coeffs[j]));
+                assert_eq!(b_out.vec[i].coeffs[j], b_norm.vec[i].coeffs[j]);
             }
         }
         for j in 0..KYBER_N {
-            assert_eq!(v_out.coeffs[j], barrett_reduce(v_norm.coeffs[j]));
+            assert_eq!(v_out.coeffs[j], v_norm.coeffs[j]);
         }
     }
 

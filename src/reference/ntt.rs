@@ -1,5 +1,5 @@
-use crate::params::KYBER_N;
-use crate::reduce::{barrett_reduce, montgomery_reduce};
+use crate::params::{KYBER_N, KYBER_Q};
+use crate::reduce::{add_mod, montgomery_reduce, sub_mod};
 
 // Layer-order zetas in Montgomery domain, centered, regenerated for q=13835058055275898369
 const ZETAS: [i128; 128] = [
@@ -134,58 +134,64 @@ const ZETAS: [i128; 128] = [
 ];
 
 // Final inverse scaling for this parameter set (Montgomery domain).
-const INV_SCALE: i128 = 144115188075855872i128;
+const INV_SCALE: u64 = 144115188075855872u64;
+const Q: u64 = KYBER_Q as u64;
 
 #[inline]
-pub(crate) fn fqmul(a: i128, b: i128) -> i128 {
-    let aa = barrett_reduce(a);
-    let bb = barrett_reduce(b);
-    montgomery_reduce((aa as u128).wrapping_mul(bb as u128))
+pub(crate) fn fqmul(a: u64, b: u64) -> u64 {
+    debug_assert!(a < Q);
+    debug_assert!(b < Q);
+    montgomery_reduce((a as u128).wrapping_mul(b as u128))
 }
 
 #[inline]
-pub(crate) fn zeta_at(i: usize) -> i128 {
-    ZETAS[i]
+pub(crate) fn zeta_at(i: usize) -> u64 {
+    let z = ZETAS[i];
+    if z < 0 {
+        (z + Q as i128) as u64
+    } else {
+        z as u64
+    }
 }
 
 #[inline]
-pub fn ntt(r: &mut [i128]) {
+pub fn ntt(r: &mut [u64]) {
     // In Kyber's layer ordering, zetas[0] (which equals MONT) is skipped; the
     // first stage starts with zetas[1].
     let mut k = 1usize;
     let mut len = KYBER_N / 2; // 128
     while len >= 2 {
         for start in (0..KYBER_N).step_by(2 * len) {
-            let zeta = ZETAS[k];
+            let zeta = zeta_at(k);
             k += 1;
             for j in start..start + len {
                 let t = fqmul(zeta, r[j + len]);
-                r[j + len] = barrett_reduce(r[j] - t);
-                r[j] = barrett_reduce(r[j] + t);
+                r[j + len] = sub_mod(r[j], t);
+                r[j] = add_mod(r[j], t);
             }
         }
         len >>= 1;
     }
 }
 
-pub fn invntt(r: &mut [i128]) {
+pub fn invntt(r: &mut [u64]) {
     invntt_butterfly(r);
     for v in r.iter_mut() {
         *v = fqmul(*v, INV_SCALE);
     }
 }
 
-fn invntt_butterfly(r: &mut [i128]) {
+fn invntt_butterfly(r: &mut [u64]) {
     let mut k = 127usize;
     let mut len = 2usize;
     while len <= KYBER_N / 2 {
         for start in (0..KYBER_N).step_by(2 * len) {
-            let zeta = ZETAS[k];
+            let zeta = zeta_at(k);
             k -= 1;
             for j in start..start + len {
                 let t = r[j];
-                r[j] = barrett_reduce(t + r[j + len]);
-                r[j + len] = barrett_reduce(r[j + len] - t);
+                r[j] = add_mod(t, r[j + len]);
+                r[j + len] = sub_mod(r[j + len], t);
                 r[j + len] = fqmul(zeta, r[j + len]);
             }
         }
@@ -201,10 +207,10 @@ mod tests {
 
     const R: u128 = 1u128 << 64;
 
-    fn to_mont(x: i128) -> i128 {
+    fn to_mont(x: u64) -> u64 {
         let r_mod_q = R % KYBER_Q as u128;
         let r2 = r_mod_q.wrapping_mul(r_mod_q) % KYBER_Q as u128;
-        let x_norm = ((x % KYBER_Q as i128) + KYBER_Q as i128) as u128 % KYBER_Q as u128;
+        let x_norm = x as u128 % KYBER_Q as u128;
         montgomery_reduce(x_norm.wrapping_mul(r2))
     }
 
@@ -212,11 +218,11 @@ mod tests {
     fn ntt_inv_roundtrip() {
         let mut rng = StdRng::seed_from_u64(123);
         for _ in 0..2 {
-            let mut a = [0i128; KYBER_N];
+            let mut a = [0u64; KYBER_N];
             for v in a.iter_mut() {
-                *v = rng.gen_range(0..KYBER_Q as i128);
+                *v = rng.gen_range(0..KYBER_Q as u64);
             }
-            let mut mont = [0i128; KYBER_N];
+            let mut mont = [0u64; KYBER_N];
             for i in 0..KYBER_N {
                 mont[i] = to_mont(a[i]);
             }
@@ -226,7 +232,7 @@ mod tests {
                 *v = montgomery_reduce(*v as u128);
             }
             for i in 0..KYBER_N {
-                assert_eq!(barrett_reduce(a[i] - mont[i]), 0, "idx {}", i);
+                assert_eq!(a[i], mont[i], "idx {}", i);
             }
         }
     }
@@ -236,12 +242,12 @@ mod tests {
         // Verify that NTT + invntt roundtrip works correctly with the scaling factor
         assert_eq!(
             INV_SCALE,
-            144115188075855872i128,
+            144115188075855872u64,
             "inv_scale mismatch in test"
         );
-        let mut a = [0i128; KYBER_N];
+        let mut a = [0u64; KYBER_N];
         a[0] = 1;
-        let mut mont = [0i128; KYBER_N];
+        let mut mont = [0u64; KYBER_N];
         for i in 0..KYBER_N {
             mont[i] = to_mont(a[i]);
         }
@@ -253,7 +259,7 @@ mod tests {
         // Impulse should roundtrip to impulse in normal domain.
         for (i, v) in mont.iter().enumerate() {
             let expected = if i == 0 { 1 } else { 0 };
-            assert_eq!(barrett_reduce(*v), expected, "idx {} val {}", i, v);
+            assert_eq!(*v, expected, "idx {} val {}", i, v);
         }
     }
 }
