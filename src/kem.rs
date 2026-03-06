@@ -53,6 +53,20 @@ pub fn crypto_kem_enc<R>(
 where
     R: RngCore + CryptoRng,
 {
+    crypto_kem_enc_inner(ct, ss, pk, _rng, _seed, KYBER_EPP_UNIFORM_BOUND)
+}
+
+pub(crate) fn crypto_kem_enc_inner<R>(
+    ct: &mut [u8],
+    ss: &mut [u8],
+    pk: &[u8],
+    _rng: &mut R,
+    _seed: Option<&[u8]>,
+    epp_bound: i128,
+) -> Result<(), KyberError>
+where
+    R: RngCore + CryptoRng,
+{
     let mut kr = [0u8; 2 * KYBER_SYMBYTES];
     let mut buf = [0u8; 2 * KYBER_SYMBYTES];
     let mut randbuf = [0u8; 2 * KYBER_SYMBYTES];
@@ -72,7 +86,7 @@ where
     hash_g(&mut kr, &buf, 2 * KYBER_SYMBYTES);
 
     // coins are in kr[KYBER_SYMBYTES..]
-    indcpa_enc(ct, &buf, pk, &kr[KYBER_SYMBYTES..]);
+    indcpa_enc_inner(ct, &buf, pk, &kr[KYBER_SYMBYTES..], epp_bound);
 
     // overwrite coins in kr with H(c)
     hash_h(&mut kr[KYBER_SYMBYTES..], ct, KYBER_CIPHERTEXTBYTES);
@@ -93,6 +107,15 @@ where
 ///
 /// On failure, ss will contain a pseudo-random value.
 pub fn crypto_kem_dec(ss: &mut [u8], ct: &[u8], sk: &[u8]) -> () {
+    crypto_kem_dec_inner(ss, ct, sk, KYBER_EPP_UNIFORM_BOUND)
+}
+
+pub(crate) fn crypto_kem_dec_inner(
+    ss: &mut [u8],
+    ct: &[u8],
+    sk: &[u8],
+    epp_bound: i128,
+) -> () {
     let mut buf = [0u8; 2 * KYBER_SYMBYTES];
     let mut kr = [0u8; 2 * KYBER_SYMBYTES];
     let mut cmp = [0u8; KYBER_CIPHERTEXTBYTES];
@@ -109,7 +132,7 @@ pub fn crypto_kem_dec(ss: &mut [u8], ct: &[u8], sk: &[u8]) -> () {
     hash_g(&mut kr, &buf, 2 * KYBER_SYMBYTES);
 
     // coins are in kr[KYBER_SYMBYTES..]
-    indcpa_enc(&mut cmp, &buf, &pk, &kr[KYBER_SYMBYTES..]);
+    indcpa_enc_inner(&mut cmp, &buf, &pk, &kr[KYBER_SYMBYTES..], epp_bound);
     let fail = verify(ct, &cmp, KYBER_CIPHERTEXTBYTES);
     // overwrite coins in kr with H(c)
     hash_h(&mut kr[KYBER_SYMBYTES..], ct, KYBER_CIPHERTEXTBYTES);

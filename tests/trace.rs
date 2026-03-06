@@ -1,5 +1,5 @@
 use pqc_kyber::{decapsulate, encapsulate, keypair, reference, KyberError};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::RngCore;
 use std::time::Instant;
 
 fn to_hex(bytes: &[u8]) -> String {

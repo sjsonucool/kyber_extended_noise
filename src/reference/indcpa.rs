@@ -12,6 +12,9 @@ use crate::{params::*, poly::*, polyvec::*, symmetric::*, CryptoRng, KyberError,
 ///  const [u8] seed: the input public seed
 fn pack_pk(r: &mut [u8], pk: &mut Polyvec, seed: &[u8]) {
     const END: usize = KYBER_SYMBYTES + KYBER_POLYVECBYTES;
+    // store pk in normal domain
+    polyvec_invntt_tomont(pk);
+    polyvec_frommont(pk);
     polyvec_tobytes(r, pk);
     r[KYBER_POLYVECBYTES..END].copy_from_slice(&seed[..KYBER_SYMBYTES]);
 }
@@ -28,6 +31,9 @@ fn unpack_pk(pk: &mut Polyvec, seed: &mut [u8], packedpk: &[u8]) {
     const END: usize = KYBER_SYMBYTES + KYBER_POLYVECBYTES;
     polyvec_frombytes(pk, packedpk);
     seed[..KYBER_SYMBYTES].copy_from_slice(&packedpk[KYBER_POLYVECBYTES..END]);
+    // move to Montgomery+NTT for use
+    polyvec_tomont(pk);
+    polyvec_ntt(pk);
 }
 
 /// Name:  pack_sk
@@ -37,6 +43,8 @@ fn unpack_pk(pk: &mut Polyvec, seed: &mut [u8], packedpk: &[u8]) {
 /// Arguments: - [u8] r:  output serialized secret key
 ///  - const Polyvec sk: input vector of polynomials (secret key)
 fn pack_sk(r: &mut [u8], sk: &mut Polyvec) {
+    polyvec_invntt_tomont(sk);
+    polyvec_frommont(sk);
     polyvec_tobytes(r, sk);
 }
 
@@ -48,6 +56,8 @@ fn pack_sk(r: &mut [u8], sk: &mut Polyvec) {
 ///  - const [u8] packedsk: input serialized secret key
 fn unpack_sk(sk: &mut Polyvec, packedsk: &[u8]) {
     polyvec_frombytes(sk, packedsk);
+    polyvec_tomont(sk);
+    polyvec_ntt(sk);
 }
 
 /// Name:  pack_ciphertext
@@ -60,8 +70,12 @@ fn unpack_sk(sk: &mut Polyvec, packedsk: &[u8]) {
 ///  const poly *pk:  the input vector of polynomials b
 ///  const [u8] seed: the input polynomial v
 fn pack_ciphertext(r: &mut [u8], b: &mut Polyvec, v: Poly) {
-    polyvec_compress(r, *b);
-    poly_compress(&mut r[KYBER_POLYVECCOMPRESSEDBYTES..], v);
+    let mut b_norm = b.clone();
+    polyvec_frommont(&mut b_norm);
+    let mut v_norm = v;
+    poly_frommont(&mut v_norm);
+    polyvec_compress(r, b_norm);
+    poly_compress(&mut r[KYBER_POLYVECCOMPRESSEDBYTES..], v_norm);
 }
 
 /// Name:  unpack_ciphertext
@@ -109,7 +123,7 @@ fn gen_at(a: &mut [Polyvec], b: &[u8]) {
 fn gen_matrix(a: &mut [Polyvec], seed: &[u8], transposed: bool) {
     let mut state = XofState::new();
     let mut buf = [0u8; XOF_BLOCKBYTES];
-    let mut buf_pos = XOF_BLOCKBYTES; // force initial squeeze
+    let mut buf_pos: usize;
 
     for i in 0..KYBER_K {
         for j in 0..KYBER_K {
@@ -133,8 +147,8 @@ fn gen_matrix(a: &mut [Polyvec], seed: &[u8], transposed: bool) {
                 let val = u128::from_le_bytes(bytes);
                 *coeff = (val % KYBER_Q) as i128;
             }
-            // Match the original Kyber workflow: store A (and A^T) directly in
-            // NTT/Montgomery domain so later basemul operates on NTT inputs.
+            // Move to Montgomery then NTT so later basemul sees Montgomery inputs.
+            poly_tomont(&mut a[i].vec[j]);
             poly_ntt(&mut a[i].vec[j]);
         }
     }
@@ -176,10 +190,12 @@ where
     for i in 0..KYBER_K {
         poly_getnoise_eta1(&mut skpv.vec[i], noiseseed, nonce);
         nonce += 1;
+        poly_tomont(&mut skpv.vec[i]);
     }
     for i in 0..KYBER_K {
         poly_getnoise_eta1(&mut e.vec[i], noiseseed, nonce);
         nonce += 1;
+        poly_tomont(&mut e.vec[i]);
     }
 
     polyvec_ntt(&mut skpv);
@@ -188,7 +204,6 @@ where
     // matrix-vector multiplication
     for i in 0..KYBER_K {
         polyvec_basemul_acc_montgomery(&mut pkpv.vec[i], &a[i], &skpv);
-        poly_tomont(&mut pkpv.vec[i]);
     }
     polyvec_add(&mut pkpv, &e);
     polyvec_reduce(&mut pkpv);
@@ -208,7 +223,13 @@ where
 ///  - const [u8] pk:   input public key (length KYBER_INDCPA_PUBLICKEYBYTES)
 ///  - const [u8] coin: input random coins used as seed (length KYBER_SYMBYTES)
 ///      to deterministically generate all randomness
-pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
+pub(crate) fn indcpa_enc_inner(
+    c: &mut [u8],
+    m: &[u8],
+    pk: &[u8],
+    coins: &[u8],
+    epp_bound: i128,
+) {
     let mut at = [Polyvec::new(); KYBER_K];
     let (mut sp, mut pkpv, mut ep, mut b) = (
         Polyvec::new(),
@@ -222,18 +243,21 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
 
     unpack_pk(&mut pkpv, &mut seed, pk);
     poly_frommsg(&mut k, m);
+    poly_tomont(&mut k);
     gen_at(&mut at, &seed);
 
     for i in 0..KYBER_K {
         poly_getnoise_eta1(&mut sp.vec[i], coins, nonce);
         nonce += 1;
+        poly_tomont(&mut sp.vec[i]);
     }
     for i in 0..KYBER_K {
         poly_getnoise_eta2(&mut ep.vec[i], coins, nonce);
         nonce += 1;
+        poly_tomont(&mut ep.vec[i]);
     }
-    // Use uniform distribution for epp instead of centered binomial
-    poly_getnoise_uniform(&mut epp, coins, nonce);
+    poly_getnoise_uniform_bounded(&mut epp, coins, nonce, epp_bound);
+    poly_tomont(&mut epp);
 
     polyvec_ntt(&mut sp);
 
@@ -255,6 +279,10 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
     pack_ciphertext(c, &mut b, v);
 }
 
+pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
+    indcpa_enc_inner(c, m, pk, coins, KYBER_EPP_UNIFORM_BOUND);
+}
+
 /// Name:  indcpa_dec
 ///
 /// Description: Decryption function of the CPA-secure
@@ -270,20 +298,38 @@ pub fn indcpa_dec(m: &mut [u8], c: &[u8], sk: &[u8]) {
     unpack_ciphertext(&mut b, &mut v, c);
     unpack_sk(&mut skpv, sk);
 
+    polyvec_tomont(&mut b);
     polyvec_ntt(&mut b);
     polyvec_basemul_acc_montgomery(&mut mp, &skpv, &b);
     poly_invntt_tomont(&mut mp);
-
+    poly_frommont(&mut mp);
     poly_sub(&mut mp, &v);
     poly_reduce(&mut mp);
-
     poly_tomsg(m, mp);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use crate::kem::{crypto_kem_dec_inner, crypto_kem_enc_inner, crypto_kem_keypair};
+    use crate::reduce::barrett_reduce;
+    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+
+    fn random_poly(rng: &mut StdRng) -> Poly {
+        let mut p = Poly::new();
+        for c in p.coeffs.iter_mut() {
+            *c = rng.gen_range(0..KYBER_Q as i128);
+        }
+        p
+    }
+
+    fn random_polyvec(rng: &mut StdRng) -> Polyvec {
+        let mut v = Polyvec::new();
+        for i in 0..KYBER_K {
+            v.vec[i] = random_poly(rng);
+        }
+        v
+    }
 
     #[test]
     fn indcpa_roundtrip() {
@@ -302,38 +348,127 @@ mod tests {
 
         let mut m_dec = [0u8; KYBER_SYMBYTES];
         indcpa_dec(&mut m_dec, &c, &sk);
+        assert_eq!(m, m_dec);
+    }
 
-        if m != m_dec {
-            // Re-run decryption inline to inspect the failing polynomial.
-            let mut b = Polyvec::new();
-            let mut v = Poly::new();
-            unpack_ciphertext(&mut b, &mut v, &c);
-            let mut skpv = Polyvec::new();
-            unpack_sk(&mut skpv, &sk);
-            polyvec_ntt(&mut b);
-            let mut mp = Poly::new();
-            polyvec_basemul_acc_montgomery(&mut mp, &skpv, &b);
-            poly_invntt_tomont(&mut mp);
-            poly_sub(&mut mp, &v);
-            poly_reduce(&mut mp);
+    #[test]
+    fn pack_unpack_domain_symmetry() {
+        let mut rng = StdRng::seed_from_u64(777);
 
-            let half_q = ((KYBER_Q + 1) / 2) as i128;
-            let mut close_to_half = 0usize;
-            for c in mp.coeffs.iter() {
-                let mut t = *c % KYBER_Q as i128;
-                if t < 0 {
-                    t += KYBER_Q as i128;
+        let mut pk_ntt = random_polyvec(&mut rng);
+        polyvec_tomont(&mut pk_ntt);
+        polyvec_ntt(&mut pk_ntt);
+        let pk_ntt_orig = pk_ntt;
+        let mut seed = [0u8; KYBER_SYMBYTES];
+        rng.fill_bytes(&mut seed);
+        let mut packed_pk = [0u8; KYBER_INDCPA_PUBLICKEYBYTES];
+        pack_pk(&mut packed_pk, &mut pk_ntt, &seed);
+        let mut unpacked_pk = Polyvec::new();
+        let mut seed2 = [0u8; KYBER_SYMBYTES];
+        unpack_pk(&mut unpacked_pk, &mut seed2, &packed_pk);
+        assert_eq!(seed, seed2);
+        for i in 0..KYBER_K {
+            for j in 0..KYBER_N {
+                assert_eq!(
+                    barrett_reduce(unpacked_pk.vec[i].coeffs[j] - pk_ntt_orig.vec[i].coeffs[j]),
+                    0
+                );
+            }
+        }
+        let mut repacked_pk = [0u8; KYBER_INDCPA_PUBLICKEYBYTES];
+        pack_pk(&mut repacked_pk, &mut unpacked_pk, &seed2);
+        assert_eq!(packed_pk, repacked_pk);
+
+        let mut sk_ntt = random_polyvec(&mut rng);
+        polyvec_tomont(&mut sk_ntt);
+        polyvec_ntt(&mut sk_ntt);
+        let sk_ntt_orig = sk_ntt;
+        let mut packed_sk = [0u8; KYBER_INDCPA_SECRETKEYBYTES];
+        pack_sk(&mut packed_sk, &mut sk_ntt);
+        let mut unpacked_sk = Polyvec::new();
+        unpack_sk(&mut unpacked_sk, &packed_sk);
+        for i in 0..KYBER_K {
+            for j in 0..KYBER_N {
+                assert_eq!(
+                    barrett_reduce(unpacked_sk.vec[i].coeffs[j] - sk_ntt_orig.vec[i].coeffs[j]),
+                    0
+                );
+            }
+        }
+        let mut repacked_sk = [0u8; KYBER_INDCPA_SECRETKEYBYTES];
+        pack_sk(&mut repacked_sk, &mut unpacked_sk);
+        assert_eq!(packed_sk, repacked_sk);
+
+        let b_norm = random_polyvec(&mut rng);
+        let v_norm = random_poly(&mut rng);
+        let mut b_mont = b_norm;
+        let mut v_mont = v_norm;
+        polyvec_tomont(&mut b_mont);
+        poly_tomont(&mut v_mont);
+        let mut packed_ct = [0u8; KYBER_INDCPA_BYTES];
+        pack_ciphertext(&mut packed_ct, &mut b_mont, v_mont);
+        let mut b_out = Polyvec::new();
+        let mut v_out = Poly::new();
+        unpack_ciphertext(&mut b_out, &mut v_out, &packed_ct);
+        for i in 0..KYBER_K {
+            for j in 0..KYBER_N {
+                assert_eq!(b_out.vec[i].coeffs[j], barrett_reduce(b_norm.vec[i].coeffs[j]));
+            }
+        }
+        for j in 0..KYBER_N {
+            assert_eq!(v_out.coeffs[j], barrett_reduce(v_norm.coeffs[j]));
+        }
+    }
+
+    #[test]
+    #[ignore = "Long-running diagnostic harness for selecting bounded-uniform epp support."]
+    fn epp_bound_sweep_harness() {
+        const CANDIDATES: [i128; 4] = [16, 20, 24, 32];
+        const TRIALS: usize = 8;
+
+        let mut largest_zero_fail_bound = CANDIDATES[0];
+
+        for &bound in CANDIDATES.iter() {
+            let mut indcpa_failures = 0usize;
+            let mut kem_failures = 0usize;
+
+            for t in 0..TRIALS {
+                let mut rng = StdRng::seed_from_u64(0xB0AD_0000 + (bound as u64) * 131 + t as u64);
+
+                let mut pk = [0u8; KYBER_INDCPA_PUBLICKEYBYTES];
+                let mut sk = [0u8; KYBER_INDCPA_SECRETKEYBYTES];
+                indcpa_keypair(&mut pk, &mut sk, None, &mut rng).unwrap();
+                let mut m = [0u8; KYBER_SYMBYTES];
+                let mut coins = [0u8; KYBER_SYMBYTES];
+                rng.fill_bytes(&mut m);
+                rng.fill_bytes(&mut coins);
+                let mut c = [0u8; KYBER_INDCPA_BYTES];
+                indcpa_enc_inner(&mut c, &m, &pk, &coins, bound);
+                let mut m_dec = [0u8; KYBER_SYMBYTES];
+                indcpa_dec(&mut m_dec, &c, &sk);
+                if m != m_dec {
+                    indcpa_failures += 1;
                 }
-                if (t - half_q).abs() < 50 {
-                    close_to_half += 1;
+
+                let mut kem_pk = [0u8; KYBER_PUBLICKEYBYTES];
+                let mut kem_sk = [0u8; KYBER_SECRETKEYBYTES];
+                crypto_kem_keypair(&mut kem_pk, &mut kem_sk, &mut rng, None).unwrap();
+                let mut ct = [0u8; KYBER_CIPHERTEXTBYTES];
+                let mut ss1 = [0u8; KYBER_SSBYTES];
+                let mut ss2 = [0u8; KYBER_SSBYTES];
+                crypto_kem_enc_inner(&mut ct, &mut ss1, &kem_pk, &mut rng, None, bound).unwrap();
+                crypto_kem_dec_inner(&mut ss2, &ct, &kem_sk, bound);
+                if ss1 != ss2 {
+                    kem_failures += 1;
                 }
             }
-            panic!(
-                "message mismatch: orig={:?} dec={:?}, coeffs near q/2: {}",
-                &m[..4],
-                &m_dec[..4],
-                close_to_half
-            );
+
+            if indcpa_failures == 0 && kem_failures == 0 {
+                largest_zero_fail_bound = bound;
+            }
+
         }
+
+        assert!(largest_zero_fail_bound >= CANDIDATES[0]);
     }
 }

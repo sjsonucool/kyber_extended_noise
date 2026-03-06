@@ -91,6 +91,18 @@ pub fn polyvec_invntt_tomont(r: &mut Polyvec) {
     }
 }
 
+pub fn polyvec_tomont(r: &mut Polyvec) {
+    for i in 0..KYBER_K {
+        poly_tomont(&mut r.vec[i]);
+    }
+}
+
+pub fn polyvec_frommont(r: &mut Polyvec) {
+    for i in 0..KYBER_K {
+        poly_frommont(&mut r.vec[i]);
+    }
+}
+
 /// Name:  polyvec_basemul_acc_montgomery
 ///
 /// Description: Pointwise multiply elements of a and b and accumulate into r
@@ -99,24 +111,12 @@ pub fn polyvec_invntt_tomont(r: &mut Polyvec) {
 ///  - const Polyvec a: first input vector of polynomials
 ///  - const Polyvec b: second input vector of polynomials
 pub fn polyvec_basemul_acc_montgomery(r: &mut Poly, a: &Polyvec, b: &Polyvec) {
-    // Convert back to normal domain, do true negacyclic convolution, then return to NTT domain.
-    let mut acc = Poly::new();
-    acc.coeffs = [0i128; KYBER_N];
-    let mut ai = Poly::new();
-    let mut bi = Poly::new();
-    let mut tmp = Poly::new();
-    for i in 0..KYBER_K {
-        ai = a.vec[i].clone();
-        bi = b.vec[i].clone();
-        // inputs are in NTT domain; bring back
-        super::ntt::invntt(&mut ai.coeffs);
-        super::ntt::invntt(&mut bi.coeffs);
-        crate::reference::poly::poly_mul_negacyclic(&mut tmp, &ai, &bi);
-        poly_add(&mut acc, &tmp);
+    let mut t = Poly::new();
+    poly_basemul(r, &a.vec[0], &b.vec[0]);
+    for i in 1..KYBER_K {
+        poly_basemul(&mut t, &a.vec[i], &b.vec[i]);
+        poly_add(r, &t);
     }
-    // back to NTT domain
-    super::ntt::ntt(&mut acc.coeffs);
-    *r = acc;
     poly_reduce(r);
 }
 

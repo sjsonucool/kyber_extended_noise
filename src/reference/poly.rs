@@ -117,11 +117,16 @@ pub fn poly_getnoise_eta2(r: &mut Poly, seed: &[u8], nonce: u8) {
 ///  - const [u8] seed: input seed (pointing to array of length KYBER_SYMBYTES bytes)
 ///  - [u8]  nonce:   one-byte input nonce
 pub fn poly_getnoise_uniform(r: &mut Poly, seed: &[u8], nonce: u8) {
-    const RANGE: u128 = (2 * KYBER_EPP_UNIFORM_BOUND) as u128;
+    poly_getnoise_uniform_bounded(r, seed, nonce, KYBER_EPP_UNIFORM_BOUND);
+}
+
+pub(crate) fn poly_getnoise_uniform_bounded(r: &mut Poly, seed: &[u8], nonce: u8, bound: i128) {
     const BYTES_PER_COEFF: usize = 8; // enough to sample up to 2*B < 2^63
     const BUF_SIZE: usize = KYBER_N * BYTES_PER_COEFF * 2;
     let mut buf = [0u8; BUF_SIZE];
     let mut buf_pos = 0usize;
+    debug_assert!(bound > 0);
+    let range: u128 = (2 * bound) as u128;
 
     prf(&mut buf, BUF_SIZE, seed, nonce);
 
@@ -139,9 +144,9 @@ pub fn poly_getnoise_uniform(r: &mut Poly, seed: &[u8], nonce: u8) {
             slice[..8].copy_from_slice(&buf[buf_pos..buf_pos + BYTES_PER_COEFF]);
             buf_pos += BYTES_PER_COEFF;
             let val = u128::from_le_bytes(slice);
-            let reduced = val % RANGE;
+            let reduced = val % range;
             // acceptance is trivial after modulus
-            r.coeffs[i] = reduced as i128 - KYBER_EPP_UNIFORM_BOUND;
+            r.coeffs[i] = reduced as i128 - bound;
             break;
         }
     }
@@ -177,8 +182,38 @@ pub fn poly_invntt_tomont(r: &mut Poly) {
 ///  - const poly *a: first input polynomial
 ///  - const poly *b: second input polynomial
 pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
-    for i in 0..KYBER_N {
-        r.coeffs[i] = crate::reduce::mul_mod(a.coeffs[i], b.coeffs[i]);
+    #[inline]
+    fn basemul_pair(a0: i128, a1: i128, b0: i128, b1: i128, zeta: i128) -> (i128, i128) {
+        let t0 = crate::reference::ntt::fqmul(a1, b1);
+        let t1 = crate::reference::ntt::fqmul(t0, zeta);
+        let r0 = barrett_reduce(t1 + crate::reference::ntt::fqmul(a0, b0));
+        let r1 = barrett_reduce(
+            crate::reference::ntt::fqmul(a0, b1) + crate::reference::ntt::fqmul(a1, b0),
+        );
+        (r0, r1)
+    }
+
+    for i in 0..(KYBER_N / 4) {
+        let idx = 4 * i;
+        let zeta = crate::reference::ntt::zeta_at(64 + i);
+        let (r0, r1) = basemul_pair(
+            a.coeffs[idx],
+            a.coeffs[idx + 1],
+            b.coeffs[idx],
+            b.coeffs[idx + 1],
+            zeta,
+        );
+        let (r2, r3) = basemul_pair(
+            a.coeffs[idx + 2],
+            a.coeffs[idx + 3],
+            b.coeffs[idx + 2],
+            b.coeffs[idx + 3],
+            barrett_reduce(-zeta),
+        );
+        r.coeffs[idx] = r0;
+        r.coeffs[idx + 1] = r1;
+        r.coeffs[idx + 2] = r2;
+        r.coeffs[idx + 3] = r3;
     }
 }
 
@@ -188,8 +223,14 @@ pub fn poly_basemul(r: &mut Poly, a: &Poly, b: &Poly) {
 ///  from normal domain to Montgomery domain
 ///
 /// Arguments:   - poly *r:   input/output polynomial
-pub fn poly_tomont(_r: &mut Poly) {
-    // Montgomery domain is not used in the simplified NTT path; leave coefficients unchanged.
+pub fn poly_tomont(r: &mut Poly) {
+    // Convert each coefficient to Montgomery domain: a * R^2 mod q.
+    const R: u128 = 1u128 << 64;
+    const R2: u128 = (R % KYBER_Q as u128) * (R % KYBER_Q as u128) % KYBER_Q as u128;
+    for c in r.coeffs.iter_mut() {
+        let a = ((*c % KYBER_Q as i128 + KYBER_Q as i128) as u128) % KYBER_Q as u128;
+        *c = crate::reduce::montgomery_reduce(a.wrapping_mul(R2));
+    }
 }
 
 /// Name:  poly_reduce
@@ -230,6 +271,7 @@ pub fn poly_sub(r: &mut Poly, a: &Poly) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn poly_mul_negacyclic(r: &mut Poly, a: &Poly, b: &Poly) {
     let mut tmp = [0i128; KYBER_N];
     for i in 0..KYBER_N {
@@ -285,7 +327,57 @@ pub fn poly_tomsg(msg: &mut [u8], a: Poly) {
     }
 }
 
-// basemul unused in pointwise scheme
+/// Convert Montgomery domain coefficients back to normal domain in place.
+pub fn poly_frommont(r: &mut Poly) {
+    // Map Montgomery residues back to the standard representation.
+    for c in r.coeffs.iter_mut() {
+        *c = crate::reduce::montgomery_reduce(*c as u128);
+    }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
-// basemul unused in pointwise scheme
+    #[test]
+    fn ntt_mul_matches_schoolbook() {
+        let mut rng = StdRng::seed_from_u64(424242);
+        for _ in 0..2 {
+            let mut a = Poly::new();
+            let mut b = Poly::new();
+            for c in a.coeffs.iter_mut() {
+                *c = rng.gen_range(0..KYBER_Q as i128);
+            }
+            for c in b.coeffs.iter_mut() {
+                *c = rng.gen_range(0..KYBER_Q as i128);
+            }
+
+            let mut want = Poly::new();
+            poly_mul_negacyclic(&mut want, &a, &b);
+            poly_reduce(&mut want);
+
+            let mut an = a;
+            let mut bn = b;
+            poly_tomont(&mut an);
+            poly_tomont(&mut bn);
+            poly_ntt(&mut an);
+            poly_ntt(&mut bn);
+
+            let mut got = Poly::new();
+            poly_basemul(&mut got, &an, &bn);
+            poly_invntt_tomont(&mut got);
+            poly_frommont(&mut got);
+            poly_reduce(&mut got);
+
+            for i in 0..KYBER_N {
+                assert_eq!(
+                    barrett_reduce(got.coeffs[i] - want.coeffs[i]),
+                    0,
+                    "mismatch at coeff {}",
+                    i
+                );
+            }
+        }
+    }
+}
