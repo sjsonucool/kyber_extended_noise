@@ -5,9 +5,9 @@ import math
 
 # Default values in argparse is for dilithium
 parser = argparse.ArgumentParser()
-parser.add_argument('-q', dest='q', type=int, help='Modulus q', default=8380417)
-parser.add_argument('-zeta', dest='zeta', type=int, help='2nth root of unity', default=1753)
-parser.add_argument('-mont', dest='mont', type=int, help='Montgomery form scalar', default=32)
+parser.add_argument('-q', dest='q', type=int, help='Modulus q', default=13835058055275898369)
+parser.add_argument('-zeta', dest='zeta', type=int, help='2nth root of unity', default=4190643123838082351)
+parser.add_argument('-mont', dest='mont', type=int, help='Montgomery form scalar', default=64)
 parser.add_argument('-n', dest='n', type=int, help='polynomial dimension', default=256)
 parser.add_argument('-skip0', dest='skip0', type=bool, action=argparse.BooleanOptionalAction, help='insert 0 into zetas[0] and skip computation for i=0', default=True)
 args = parser.parse_args()

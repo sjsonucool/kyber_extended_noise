@@ -15,8 +15,10 @@ pub fn montgomery_reduce(a: u128) -> i128 {
     let mq_lo = mq & R_MASK;
     let mq_hi = mq >> 64;
 
-    let (_sum_lo, carry) = a_lo.overflowing_add(mq_lo);
-    let sum_hi = a_hi + mq_hi + if carry { 1 } else { 0 };
+    // Compute carry from 64-bit addition: (a_lo + mq_lo) >> 64
+    let sum_lo = a_lo + mq_lo;
+    let carry = sum_lo >> 64;
+    let sum_hi = a_hi + mq_hi + carry;
 
     let mut res = sum_hi; // low limb cancels
     if res >= KYBER_Q as u128 {

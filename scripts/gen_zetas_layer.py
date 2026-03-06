@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate Kyber-style zetas (tree permutation) for the custom modulus, following
-the reference pattern exactly:
-
-tmp[0] = MONT
-tmp[i] = fqmul(tmp[i-1], MONT*ROOT % q)
-zetas[i] = tmp[tree[i]]
-center to (−q/2, q/2)
-
+Generate Kyber-style zetas in layer-consumption order for the custom modulus.
+Pattern:
+  tmp[0] = MONT
+  tmp[i] = mont_reduce(tmp[i-1] * (MONT*ROOT % q))
+  zetas_tree[i] = tmp[tree[i]]
+Then reorder to the forward DIF consumption order (k starts at 1, len=128).
 ROOT must be a primitive 256-th root with ROOT^128 = -1 (mod q).
-We use ROOT = 4190643123838082351 found for q = 13835058055275898369.
 """
 
 Q = 13_835_058_055_275_898_369  # modulus
@@ -49,10 +46,17 @@ def gen_zetas():
     root_mont = (mont * ROOT) % Q  # MONT * ROOT
     for i in range(1, 128):
         tmp[i] = montgomery_reduce(tmp[i - 1] * root_mont)
-    zetas = [0] * 128
-    for i, idx in enumerate(TREE):
-        zetas[i] = tmp[idx] % Q  # keep in [0, q)
-    return zetas
+    zetas_tree = [tmp[idx] % Q for idx in TREE]
+    # Build layer order for forward DIF: len starts 128, k starts at 1
+    zetas_layer = [zetas_tree[0]]  # keep zetas[0] so table has 128 entries
+    k = 1
+    length = 128
+    while length >= 2:
+        for _ in range(0, 256, 2 * length):
+            zetas_layer.append(zetas_tree[k])
+            k += 1
+        length //= 2
+    return zetas_layer
 
 
 def main():
