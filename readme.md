@@ -17,11 +17,11 @@ A rust implementation of the Kyber algorithm, a KEM standardised by the NIST Pos
 This library:
 * Is no_std compatible and needs no allocator, suitable for embedded devices. 
 * Reference files contain no unsafe code and are written in pure rust.
-* On x86_64 platforms offers an avx2 optimized version, which includes assembly from the C reference repo. 
+* Keeps an avx2 optimized codebase for future work; current custom-parameter path uses the reference implementation.
 * Compiles to WASM using wasm-bindgen and has a ready-to-use binary published on NPM.
 
 
-See the [**features**](#features) section for different options regarding security levels and modes of operation. The default security setting is kyber768.
+See the [**features**](#features) section for optional mode/runtime toggles. This repository uses a single fixed custom parameter set.
 
 It is recommended to use Kyber in a hybrid system alongside a traditional key exchange algorithm such as X25519. 
 
@@ -122,7 +122,7 @@ assert_eq!(alice.shared_secret, bob.shared_secret);
 ## Errors
 The KyberError enum has two variants:
 
-* **InvalidInput** - One or more inputs to a function are incorrectly sized. A possible cause of this is two parties using different security levels while trying to negotiate a key exchange.
+* **InvalidInput** - One or more inputs to a function are incorrectly sized. A possible cause of this is two parties using different parameter/config settings while trying to negotiate a key exchange.
 
 * **Decapsulation** - The ciphertext was unable to be authenticated. The shared secret was not decapsulated.
 
@@ -132,22 +132,20 @@ The KyberError enum has two variants:
 
 ## Features
 
-If no security level is specified then kyber768 is used by default as recommended by the authors. It is roughly equivalent to AES-192.  Apart from the two security levels, all other features can be combined as needed. For example:
+This crate now targets a single fixed parameter set (see `src/params.rs`). Optional features can be combined as needed. For example:
 
 ```toml
 [dependencies]
-pqc_kyber = {version = "0.7.1", features = ["kyber512", "90s", "avx2"]}
+pqc_kyber = {version = "0.7.1", features = ["90s", "avx2"]}
 ```
 
 
 | Feature   | Description |
 |-----------|------------|
 | std | Enable the standard library |
-| kyber512  | Enables kyber512 mode, with a security level roughly equivalent to AES-128.|
-| kyber1024 | Enables kyber1024 mode, with a security level roughly equivalent to AES-256.  A compile-time error is raised if more than one security level is specified.|
 | 90s | Uses AES256 in counter mode and SHA2 as a replacement for SHAKE. This can provide hardware speedups in some cases.|
 | 90s-fixslice | Uses a fixslice implementation of AES256 by RustCrypto, this provides greater side-channel attack resistance, especially on embedded platforms |
-| avx2 | On x86_64 platforms enable the optimized version. This flag is will cause a compile error on other architectures. |
+| avx2 | Reserved for future optimized custom-parameter support; current path remains reference. |
 | wasm | For compiling to WASM targets|
 | nasm | Uses Netwide Assembler avx2 code instead of GAS for portability. Requires a nasm compiler: https://www.nasm.us/ | 
 | zeroize | This will zero out the key exchange structs on drop using the [zeroize](https://docs.rs/zeroize/latest/zeroize/) crate |
@@ -156,19 +154,17 @@ pqc_kyber = {version = "0.7.1", features = ["kyber512", "90s", "avx2"]}
 
 ## Testing
 
-The [run_all_tests](tests/run_all_tests.sh) script will traverse all possible codepaths by running a matrix of the security levels, variants and crate features.
+The [run_all_tests](tests/run_all_tests.sh) script traverses supported mode/feature combinations for this fixed parameter set.
 
-Known Answer Tests require deterministic rng seeds, enable `kyber_kat` in `RUSTFLAGS`to use them. 
-Using this outside of `cargo test` will result in a compile-time error. 
-The test vector files are quite large, you will need to build them yourself from the C reference code. 
-There's a helper script to do this [here](./tests/KAT/build_kats.sh). 
+Legacy Known Answer Tests (`--cfg kyber_kat`) from standard Kyber levels are disabled for this custom parameter set.
+Attempting to enable `kyber_kat` now fails fast with a clear compile-time error.
 
 ```bash
-# This example runs the basic tests for kyber768
+# This runs the standard tests for the fixed custom parameter set
 cargo test
 
-# This runs the KATs for kyber512 in 90's mode
-RUSTFLAGS='--cfg kyber_kat' cargo test --features "kyber512 90s"
+# This runs the same tests in 90s mode
+cargo test --features "90s"
 ```
 
 See the [testing readme](./tests/readme.md) for more comprehensive info.
@@ -215,9 +211,9 @@ wasm-pack build -- --features wasm
 
 Which will export the wasm, javascript and  typescript files into [./pkg/](./pkg/readme.md). 
 
-To compile a different variant into a separate folder: 
+To compile to a separate folder:
 ```shell
-wasm-pack build --out-dir pkg_kyber512/ -- --features "wasm kyber512" 
+wasm-pack build --out-dir pkg_custom/ -- --features "wasm"
 ```
 
 There is also a basic html demo in the [www](./www/readme.md) folder.
@@ -278,4 +274,3 @@ Contributions welcome. For pull requests create a feature fork and submit it to 
 The PQClean project has rust bindings for their Kyber C codebase:
 
 https://github.com/rustpq/pqcrypto
-

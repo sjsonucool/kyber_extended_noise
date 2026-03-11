@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix: 
-        level: [kyber512, "", kyber1024]
         nineties: [90s, ""]
     
     steps:
@@ -25,4 +24,9 @@ jobs:
           override: true
 
       - name: Run Benches
-        run: cargo bench --features "benchmarking ${{ matrix.level }} ${{ matrix.nineties }}"
+        run: |
+          if [ -z "${{ matrix.nineties }}" ]; then
+            cargo bench --features "benchmarking"
+          else
+            cargo bench --features "benchmarking ${{ matrix.nineties }}"
+          fi

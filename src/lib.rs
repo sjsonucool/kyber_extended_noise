@@ -5,19 +5,17 @@
 //! This library:
 //! * Is no_std compatible and uses no allocations, suitable for embedded devices.
 //! * The reference files contain no unsafe code.
-//! * On x86_64 platforms uses an optimized avx2 version by default.
+//! * Uses the reference implementation for the fixed custom parameter set.
 //! * Compiles to WASM using wasm-bindgen.
 //!
 //! ## Features
-//! If no security level is set then kyber768 is used, this is roughly equivalent to AES-196. See below for setting other levels.
-//! A compile-time error is raised if more than one level is specified. Besides that all other features can be mixed as needed:
+//! This crate uses a single fixed parameter set defined in `params.rs`.
+//! Additional features can be mixed as needed:
 //!
 //! | Feature   | Description                                                                                                                                                                |
 //! |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-//! | kyber512  | Enables kyber512 mode, with a security level roughly equivalent to AES-128.                                                                                                |
-//! | kyber1024 | Enables kyber1024 mode, with a security level roughly equivalent to AES-256.                   |
 //! | 90s       | 90's mode uses SHA2 and AES-CTR as a replacement for SHAKE. This may provide hardware speedups on certain architectures.                                                           |
-//! | avx2      | On x86_64 platforms enable the optimized version. This flag is will cause a compile error on other architectures. |
+//! | avx2      | Reserved for future optimized custom-parameter support; current path remains reference. |
 //! | wasm      | For compiling to WASM targets. |
 //! | nasm | Uses Netwide Assembler avx2 code instead of GAS for portability. Requires a nasm compiler: https://www.nasm.us/ |
 //! | zeroize | This will zero out the key exchange structs on drop using the [zeroize](https://docs.rs/zeroize/latest/zeroize/) crate |
@@ -115,16 +113,12 @@
 //! The [KyberError](enum.KyberError.html) enum handles errors. It has two variants:
 //!
 //! * **InvalidInput** - One or more byte inputs to a function are incorrectly sized. A likely cause of
-//! this is two parties using different security levels while trying to negotiate a key exchange.
+//! this is two parties using different parameter/config settings while trying to negotiate a key exchange.
 //!
 //! * **Decapsulation** - The ciphertext was unable to be authenticated. The shared secret was not decapsulated  
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::many_single_char_names)]
-
-// Prevent usage of mutually exclusive features
-#[cfg(all(feature = "kyber1024", feature = "kyber512"))]
-compile_error!("Only one security level can be specified");
 
 // AVX2 path is disabled for the custom parameter set; always use reference.
 pub mod reference;
@@ -155,8 +149,7 @@ pub use params::{
 pub use rand_core::{CryptoRng, RngCore};
 
 
-// Feature hack to expose private functions for the Known Answer Tests
-// and fuzzing. Will fail to compile if used outside `cargo test` or
-// the fuzz binaries.
+// Feature hack to expose private functions for benchmark/fuzz harnesses.
+// Legacy `kyber_kat` mode is fail-fast guarded in `tests/kat.rs`.
 #[cfg(any(kyber_kat, fuzzing, feature = "benchmarking"))]
 pub use kem::*;

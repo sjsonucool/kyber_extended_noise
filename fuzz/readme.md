@@ -25,10 +25,10 @@ So to run on x86_64 platforms:
 export RUSTFLAGS="-Z sanitizer=address -C target-cpu=native -C target-feature=+aes,+avx2,+sse2,+sse4.1,+bmi2,+popcnt"
 cargo hfuzz run <TARGET>
 ```
-Run different security levels and modes:
+Run different modes:
 
 ```bash
-cargo hfuzz run <TARGET> --features "kyber512 90s"
+cargo hfuzz run <TARGET> --features "90s"
 ```
 
 Current targets are: 

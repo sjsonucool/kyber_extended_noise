@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# This script runs a matrix of every valid feature combination
+# This script runs a matrix of supported feature combinations
 #
 # Variables: 
 # KAT - Runs the known answer tests
@@ -53,18 +53,18 @@ start=`date +%s`
 
 announce $TARGET
 
-LEVELS=("kyber512" "kyber768" "kyber1024")
 NINES=("" "90s" "90s-fixslice")
 
-for level in "${LEVELS[@]}"; do
-  for nine in "${NINES[@]}"; do
-    for opt in "${OPT[@]}"; do
-      name="$level $nine $opt"
-      feat=${level:+"$level"}${opt:+",$opt"}${nine:+",$nine"}
-      announce "$name"
-      RUSTFLAGS=$RUSTFLAGS cargo test --features $feat
-      break;
-    done
+for nine in "${NINES[@]}"; do
+  for opt in "${OPT[@]}"; do
+    name="$nine $opt"
+    feat=${opt:+$opt}${nine:+${opt:+,}$nine}
+    announce "$name"
+    if [ -z "$feat" ]; then
+      RUSTFLAGS=$RUSTFLAGS cargo test
+    else
+      RUSTFLAGS=$RUSTFLAGS cargo test --features "$feat"
+    fi
   done
 done
 

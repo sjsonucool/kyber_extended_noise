@@ -43,12 +43,9 @@ name = "api"
 harness = false
 
 [features]
-### Security Levels ###
-# Defaults to "kyber768" if none selected
-# Will throw a compile-time error if more than one level is chosen
-kyber512 = []
-kyber768 = [] 
-kyber1024 = []
+### Parameter Set ###
+# This crate now uses a single fixed custom parameter set from `src/params.rs`.
+# Security-level feature selection is not supported anymore.
 
 ### Export IND-CPA primitives
 # **WARNING** use with caution

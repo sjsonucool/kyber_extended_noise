@@ -1,4 +1,4 @@
-use crate::params::KYBER_N;
+use crate::params::{KYBER_ETA1, KYBER_N};
 use crate::poly::Poly;
 use crate::reduce::centered_to_mod_q;
 
@@ -22,7 +22,7 @@ fn load32_littleendian(x: &[u8]) -> u32 {
 ///
 /// Description: load 3 bytes into a 32-bit integer
 ///  in little-endian order
-///  This function is only needed for Kyber-512
+///  This function is only needed when eta1=3
 ///
 /// Arguments:   - const [u8] x: input byte array
 ///
@@ -80,10 +80,10 @@ pub fn cbd3(r: &mut Poly, buf: &[u8]) {
 }
 
 pub fn poly_cbd_eta1(r: &mut Poly, buf: &[u8]) {
-    if cfg!(feature = "kyber512") {
-        cbd3(r, buf)
-    } else {
-        cbd2(r, buf)
+    match KYBER_ETA1 {
+        2 => cbd2(r, buf),
+        3 => cbd3(r, buf),
+        _ => panic!("Unsupported KYBER_ETA1 value: {}", KYBER_ETA1),
     }
 }
 

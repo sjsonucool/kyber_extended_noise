@@ -16,15 +16,23 @@ jobs:
           mips-unknown-linux-gnu,
           mips64-unknown-linux-gnuabi64,
         ]
-        feature: [kyber512, kyber768, kyber1024]
         opt: ["", 90s, "90s-fixslice"]
         
     steps:
       - uses: actions/checkout@v3
 
-      - name: Cross Compile Tests ${{ matrix.target }} ${{ matrix.feature }} ${{ matrix.opt }}
+      - name: Cross Compile Tests ${{ matrix.target }} (default)
+        if: matrix.opt == ''
         uses: actions-rs/cargo@v1.0.1
         with:
           use-cross: true
           command: test
-          args: --target ${{ matrix.target }} --features "${{ matrix.feature }} ${{ matrix.opt }}" 
+          args: --target ${{ matrix.target }}
+
+      - name: Cross Compile Tests ${{ matrix.target }} ${{ matrix.opt }}
+        if: matrix.opt != ''
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          use-cross: true
+          command: test
+          args: --target ${{ matrix.target }} --features "${{ matrix.opt }}"
