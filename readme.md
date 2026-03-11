@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/crates/l/pqc_kyber)](https://github.com/Argyle-Software/kyber/blob/master/LICENSE-MIT)
 [![dependency status](https://deps.rs/crate/pqc_kyber/latest/status.svg)](https://deps.rs/crate/pqc_kyber)
 
-A rust implementation of the Kyber algorithm, a KEM standardised by the NIST Post-Quantum Standardization Project.
+A Rust implementation derived from Kyber, now adapted to a fixed custom parameter set (not standard Kyber 512/768/1024).
 
 This library:
 * Is no_std compatible and needs no allocator, suitable for embedded devices. 
@@ -22,6 +22,31 @@ This library:
 
 
 See the [**features**](#features) section for optional mode/runtime toggles. This repository uses a single fixed custom parameter set.
+
+## Custom Parameter Set
+
+This repository no longer supports selectable Kyber levels. It uses one fixed parameter set:
+
+| Parameter | Value |
+|-----------|-------|
+| `N` | `256` |
+| `k` | `12` |
+| `q` | `13835058055275898369` |
+| `log2(q)` | `64` |
+| `eta1`, `eta2` | `2`, `2` |
+| `epp` | Bounded-uniform in `[-B, B)` with default `B = 16` |
+| Coefficient representation | `u64` (uncompressed serialization) |
+
+Implemented serialization sizes in this codebase:
+
+| Item | Bytes | Bits |
+|------|-------|------|
+| IND-CPA public key | `24608` | `196864` |
+| IND-CPA secret key | `24576` | `196608` |
+| IND-CPA ciphertext | `26624` | `212992` |
+
+Compatibility note:
+- This implementation is **not** drop-in compatible with standard Kyber/ML-KEM parameter sets and their official KAT vectors.
 
 It is recommended to use Kyber in a hybrid system alongside a traditional key exchange algorithm such as X25519. 
 
@@ -244,7 +269,10 @@ Please use at your own risk.
 
 ## About
 
-Kyber is an IND-CCA2-secure key encapsulation mechanism (KEM), whose security is based on the hardness of solving the learning-with-errors (LWE) problem over module lattices. It is the final standardised algorithm resulting from the [NIST post-quantum cryptography project](https://csrc.nist.gov/Projects/Post-Quantum-Cryptography).
+This repository started from Kyber and now implements a custom-parameter MLWE KEM/PKE variant.
+The security model remains lattice-based (module-LWE style), but concrete parameters and wire format differ from standard Kyber/ML-KEM.
+
+Standard Kyber reference information:
 
 The official website: https://pq-crystals.org/kyber/
 
