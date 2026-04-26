@@ -283,6 +283,22 @@ pub fn indcpa_enc(c: &mut [u8], m: &[u8], pk: &[u8], coins: &[u8]) {
     indcpa_enc_inner(c, m, pk, coins, KYBER_EPP_UNIFORM_BOUND);
 }
 
+/// INDCPA encryption with an explicit bounded-uniform `epp` range.
+///
+/// This is intended for hazmat experiments (for example reliability sweeps
+/// over candidate bounds) while the default API keeps using
+/// `KYBER_EPP_UNIFORM_BOUND`.
+#[cfg(feature = "hazmat")]
+pub fn indcpa_enc_with_epp_bound(
+    c: &mut [u8],
+    m: &[u8],
+    pk: &[u8],
+    coins: &[u8],
+    epp_bound: i128,
+) {
+    indcpa_enc_inner(c, m, pk, coins, epp_bound);
+}
+
 /// Name:  indcpa_dec
 ///
 /// Description: Decryption function of the CPA-secure

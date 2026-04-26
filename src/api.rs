@@ -51,6 +51,24 @@ where
     Ok((ct, ss))
 }
 
+/// Hazmat helper to encapsulate with an explicit bounded-uniform `epp` range.
+///
+/// This is primarily used for reliability experiments over candidate `epp`
+/// bounds. Production callers should prefer [`encapsulate`].
+#[cfg(feature = "hazmat")]
+pub fn encapsulate_with_epp_bound<R>(pk: &[u8], rng: &mut R, epp_bound: i128) -> Encapsulated
+where
+    R: CryptoRng + RngCore,
+{
+    if pk.len() != KYBER_PUBLICKEYBYTES {
+        return Err(KyberError::InvalidInput);
+    }
+    let mut ct = [0u8; KYBER_CIPHERTEXTBYTES];
+    let mut ss = [0u8; KYBER_SSBYTES];
+    crypto_kem_enc_inner(&mut ct, &mut ss, pk, rng, None, epp_bound)?;
+    Ok((ct, ss))
+}
+
 /// Decapsulates ciphertext with a secret key, the result will contain
 /// a KyberError if decapsulation fails
 ///
@@ -71,6 +89,20 @@ pub fn decapsulate(ct: &[u8], sk: &[u8]) -> Decapsulated {
     }
     let mut ss = [0u8; KYBER_SSBYTES];
     crypto_kem_dec(&mut ss, ct, sk);
+    Ok(ss)
+}
+
+/// Hazmat helper to decapsulate with an explicit bounded-uniform `epp` range.
+///
+/// This is primarily used for reliability experiments over candidate `epp`
+/// bounds. Production callers should prefer [`decapsulate`].
+#[cfg(feature = "hazmat")]
+pub fn decapsulate_with_epp_bound(ct: &[u8], sk: &[u8], epp_bound: i128) -> Decapsulated {
+    if ct.len() != KYBER_CIPHERTEXTBYTES || sk.len() != KYBER_SECRETKEYBYTES {
+        return Err(KyberError::InvalidInput);
+    }
+    let mut ss = [0u8; KYBER_SSBYTES];
+    crypto_kem_dec_inner(&mut ss, ct, sk, epp_bound);
     Ok(ss)
 }
 
