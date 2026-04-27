@@ -34,7 +34,7 @@ This repository no longer supports selectable Kyber levels. It uses one fixed pa
 | `q` | `13835058055275898369` |
 | `log2(q)` | `64` |
 | `eta1`, `eta2` | `2`, `2` |
-| `epp` | Bounded-uniform in `[-B, B)` with default `B = 16` |
+| `epp` | Bounded-uniform in `[-B, B)` with default `B = 3458764513818968448` |
 | Coefficient representation | `u64` (uncompressed serialization) |
 
 Implemented serialization sizes in this codebase:

@@ -23,7 +23,7 @@ pub const KYBER_ETA2: usize = 2;
 
 /// Uniform error distribution bound for epp (error scalar polynomial).
 /// Scalar error bound (uniform). Conservative value to maintain correctness.
-pub const KYBER_EPP_UNIFORM_BOUND: i128 = 16;
+pub const KYBER_EPP_UNIFORM_BOUND: i128 = 3458764513818968448;
 
 // Size of the hashes and seeds
 pub const KYBER_SYMBYTES: usize = 32;
