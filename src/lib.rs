@@ -8,6 +8,19 @@
 //! * Uses the reference implementation for the fixed custom parameter set.
 //! * Compiles to WASM using wasm-bindgen.
 //!
+//! ## Custom Parameter Set
+//! This crate uses one fixed custom parameter set (not Kyber level selection):
+//!
+//! | Parameter | Value |
+//! |-----------|-------|
+//! | `N` | `256` |
+//! | `k` | `12` |
+//! | `q` | `18446744073709550593` |
+//! | `log2(q)` | `64` |
+//! | `eta1`, `eta2` | `2`, `2` |
+//! | `epp` | Bounded-uniform in `[-B, B)` with default `B = 4611686018427381504` |
+//! | `B` relation | `B = floor(q/4) - 2Nk` |
+//!
 //! ## Features
 //! This crate uses a single fixed parameter set defined in `params.rs`.
 //! Additional features can be mixed as needed:
