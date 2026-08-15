@@ -15,7 +15,7 @@ pub const KYBER_90S: bool = cfg!(feature = "90s");
 pub const KYBER_N: usize = 256;
 
 /// Modulus Q for polynomial arithmetic (64‑bit prime picked by lattice_estimator).
-pub const KYBER_Q: u128 = 13_835_058_055_275_898_369u128;
+pub const KYBER_Q: u128 = 18446744073709550593u128;
 
 /// Noise parameters are left at the classic Kyber defaults.
 pub const KYBER_ETA1: usize = 2;
@@ -23,7 +23,7 @@ pub const KYBER_ETA2: usize = 2;
 
 /// Uniform error distribution bound for epp (error scalar polynomial).
 /// Scalar error bound (uniform). Conservative value to maintain correctness.
-pub const KYBER_EPP_UNIFORM_BOUND: i128 = 3458764513818968448;
+pub const KYBER_EPP_UNIFORM_BOUND: i128 = 4611686018427381504;
 
 // Size of the hashes and seeds
 pub const KYBER_SYMBYTES: usize = 32;

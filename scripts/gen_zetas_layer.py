@@ -9,10 +9,10 @@ Then reorder to the forward DIF consumption order (k starts at 1, len=128).
 ROOT must be a primitive 256-th root with ROOT^128 = -1 (mod q).
 """
 
-Q = 13_835_058_055_275_898_369  # modulus
+Q = 18446744073709550593  # modulus
 R = 1 << 64
-QINV = 1695300616315495935      # -q^{-1} mod 2^64
-ROOT = 4_190_643_123_838_082_351  # primitive 256-th root, ROOT^128 = -1 mod q
+QINV = 17292695568609442815      # -q^{-1} mod 2^64
+ROOT = 12400524647368804660  # primitive 256-th root, ROOT^128 = -1 mod q
 
 TREE = [
     0, 64, 32, 96, 16, 80, 48, 112, 8, 72, 40, 104, 24, 88, 56, 120,

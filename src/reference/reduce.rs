@@ -7,7 +7,7 @@ const Q_U64: u64 = KYBER_Q as u64;
 const TWO64_MINUS_Q: u64 = ((1u128 << 64) - Q_U128) as u64;
 const Q_I128: i128 = KYBER_Q as i128;
 // -q^{-1} mod R
-const QINV: u128 = 1695300616315495935;
+const QINV: u128 = 17292695568609442815;
 
 #[inline]
 pub fn montgomery_reduce(a: u128) -> u64 {
